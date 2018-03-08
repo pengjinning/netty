@@ -49,6 +49,7 @@ import org.apache.directory.server.dns.messages.RecordClass;
 import org.apache.directory.server.dns.messages.RecordType;
 import org.apache.directory.server.dns.messages.ResourceRecord;
 import org.apache.directory.server.dns.messages.ResourceRecordModifier;
+import org.apache.directory.server.dns.messages.ResponseCode;
 import org.apache.directory.server.dns.store.DnsAttribute;
 import org.apache.directory.server.dns.store.RecordStore;
 import org.junit.AfterClass;
@@ -73,6 +74,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.netty.handler.codec.dns.DnsRecordType.A;
 import static io.netty.handler.codec.dns.DnsRecordType.AAAA;
@@ -103,104 +105,105 @@ public class DnsNameResolverTest {
     // $ head -100 top-1m.csv | cut -d, -f2 | cut -d/ -f1 | while read L; do echo '"'"$L"'",'; done > topsites.txt
     private static final Set<String> DOMAINS = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             "google.com",
-            "facebook.com",
             "youtube.com",
-            "yahoo.com",
+            "facebook.com",
             "baidu.com",
             "wikipedia.org",
-            "amazon.com",
-            "twitter.com",
-            "qq.com",
-            "taobao.com",
-            "linkedin.com",
-            "google.co.in",
-            "live.com",
-            "hao123.com",
-            "sina.com.cn",
-            "blogspot.com",
-            "weibo.com",
-            "yahoo.co.jp",
-            "tmall.com",
-            "yandex.ru",
-            "sohu.com",
-            "bing.com",
-            "ebay.com",
-            "pinterest.com",
-            "vk.com",
-            "google.de",
-            "wordpress.com",
-            "apple.com",
-            "google.co.jp",
-            "google.co.uk",
-            "360.cn",
-            "instagram.com",
-            "google.fr",
-            "msn.com",
-            "ask.com",
-            "soso.com",
-            "google.com.br",
-            "tumblr.com",
-            "paypal.com",
-            "mail.ru",
-            "xvideos.com",
-            "microsoft.com",
-            "google.ru",
+            "yahoo.com",
             "reddit.com",
+            "google.co.in",
+            "qq.com",
+            "amazon.com",
+            "taobao.com",
+            "tmall.com",
+            "twitter.com",
+            "vk.com",
+            "live.com",
+            "sohu.com",
+            "instagram.com",
+            "google.co.jp",
+            "sina.com.cn",
+            "jd.com",
+            "weibo.com",
+            "360.cn",
+            "google.de",
+            "google.co.uk",
+            "google.com.br",
+            "list.tmall.com",
+            "google.ru",
+            "google.fr",
+            "yandex.ru",
+            "netflix.com",
             "google.it",
-            "imgur.com",
-            "163.com",
+            "google.com.hk",
+            "linkedin.com",
+            "pornhub.com",
+            "t.co",
             "google.es",
+            "twitch.tv",
+            "alipay.com",
+            "xvideos.com",
+            "ebay.com",
+            "yahoo.co.jp",
+            "google.ca",
+            "google.com.mx",
+            "bing.com",
+            "ok.ru",
+            "imgur.com",
+            "microsoft.com",
+            "mail.ru",
             "imdb.com",
             "aliexpress.com",
-            "t.co",
-            "go.com",
-            "adcash.com",
-            "craigslist.org",
-            "amazon.co.jp",
-            "alibaba.com",
-            "google.com.mx",
-            "stackoverflow.com",
-            "xhamster.com",
-            "fc2.com",
-            "google.ca",
-            "bbc.co.uk",
-            "espn.go.com",
-            "cnn.com",
-            "google.co.id",
-            "people.com.cn",
-            "gmw.cn",
-            "pornhub.com",
-            "blogger.com",
-            "huffingtonpost.com",
-            "flipkart.com",
-            "akamaihd.net",
+            "hao123.com",
+            "msn.com",
+            "tumblr.com",
+            "csdn.net",
+            "wikia.com",
+            "wordpress.com",
+            "office.com",
             "google.com.tr",
-            "amazon.de",
-            "netflix.com",
-            "onclickads.net",
-            "googleusercontent.com",
-            "kickass.to",
+            "livejasmin.com",
+            "amazon.co.jp",
+            "deloton.com",
+            "apple.com",
             "google.com.au",
+            "paypal.com",
+            "google.com.tw",
+            "bongacams.com",
+            "popads.net",
+            "whatsapp.com",
+            "blogspot.com",
+            "detail.tmall.com",
             "google.pl",
-            "xinhuanet.com",
-            "ebay.de",
-            "wordpress.org",
-            "odnoklassniki.ru",
-            "google.com.hk",
-            "adobe.com",
-            "dailymotion.com",
-            "dailymail.co.uk",
-            "indiatimes.com",
+            "microsoftonline.com",
+            "xhamster.com",
+            "google.co.id",
+            "github.com",
+            "stackoverflow.com",
+            "pinterest.com",
+            "amazon.de",
+            "diply.com",
             "amazon.co.uk",
+            "so.com",
+            "google.com.ar",
+            "coccoc.com",
+            "soso.com",
+            "espn.com",
+            "adobe.com",
+            "google.com.ua",
+            "tianya.cn",
             "xnxx.com",
-            "rakuten.co.jp",
+            "googleusercontent.com",
+            "savefrom.net",
+            "google.com.pk",
+            "amazon.in",
+            "nicovideo.jp",
+            "google.co.th",
             "dropbox.com",
-            "tudou.com",
-            "about.com",
-            "cnet.com",
-            "vimeo.com",
-            "redtube.com",
-            "blogspot.in",
+            "thepiratebay.org",
+            "google.com.sa",
+            "google.com.eg",
+            "pixnet.net",
             "localhost")));
 
     private static final Map<String, String> DOMAINS_PUNYCODE = new HashMap<String, String>();
@@ -810,6 +813,108 @@ public class DnsNameResolverTest {
             assertEquals(firstName, resolvedAddress.getHostName());
         } finally {
             dnsServer2.stop();
+            if (resolver != null) {
+                resolver.close();
+            }
+        }
+    }
+
+    @Test
+    public void testCNAMERecursiveResolveMultipleNameServersIPv4() throws IOException {
+        testCNAMERecursiveResolveMultipleNameServers(true);
+    }
+
+    @Test
+    public void testCNAMERecursiveResolveMultipleNameServersIPv6() throws IOException {
+        testCNAMERecursiveResolveMultipleNameServers(false);
+    }
+
+    private static void testCNAMERecursiveResolveMultipleNameServers(boolean ipv4Preferred) throws IOException {
+        final String firstName = "firstname.nettyfoo.com";
+        final String lastName = "lastname.nettybar.com";
+        final String ipv4Addr = "1.2.3.4";
+        final String ipv6Addr = "::1";
+        final AtomicBoolean hitServer2 = new AtomicBoolean();
+        final TestDnsServer dnsServer2 = new TestDnsServer(new RecordStore() {
+            @Override
+            public Set<ResourceRecord> getRecords(QuestionRecord question) throws DnsException {
+                hitServer2.set(true);
+                if (question.getDomainName().equals(firstName)) {
+                    ResourceRecordModifier rm = new ResourceRecordModifier();
+                    rm.setDnsClass(RecordClass.IN);
+                    rm.setDnsName(question.getDomainName());
+                    rm.setDnsTtl(100);
+                    rm.setDnsType(RecordType.CNAME);
+                    rm.put(DnsAttribute.DOMAIN_NAME, lastName);
+                    return Collections.singleton(rm.getEntry());
+                } else {
+                    throw new DnsException(ResponseCode.REFUSED);
+                }
+            }
+        });
+        final TestDnsServer dnsServer3 = new TestDnsServer(new RecordStore() {
+            @Override
+            public Set<ResourceRecord> getRecords(QuestionRecord question) throws DnsException {
+                if (question.getDomainName().equals(lastName)) {
+                    ResourceRecordModifier rm = new ResourceRecordModifier();
+                    rm.setDnsClass(RecordClass.IN);
+                    rm.setDnsName(question.getDomainName());
+                    rm.setDnsTtl(100);
+                    rm.setDnsType(question.getRecordType());
+                    switch (question.getRecordType()) {
+                        case A:
+                            rm.put(DnsAttribute.IP_ADDRESS, ipv4Addr);
+                            break;
+                        case AAAA:
+                            rm.put(DnsAttribute.IP_ADDRESS, ipv6Addr);
+                            break;
+                        default:
+                            return null;
+                    }
+
+                    return Collections.singleton(rm.getEntry());
+                } else {
+                    throw new DnsException(ResponseCode.REFUSED);
+                }
+            }
+        });
+        dnsServer2.start();
+        dnsServer3.start();
+        DnsNameResolver resolver = null;
+        try {
+            DnsCache nsCache = new DefaultDnsCache();
+            // What we want to test is the following:
+            // 1. Do a DNS query.
+            // 2. CNAME is returned, we want to lookup that CNAME on multiple DNS servers
+            // 3. The first DNS server should fail
+            // 4. The second DNS server should succeed
+            // This verifies that we do in fact follow multiple DNS servers in the CNAME resolution.
+            // The DnsCache is used for the name server cache, but doesn't provide a InetSocketAddress (only InetAddress
+            // so no port), so we only specify the name server in the cache, and then specify both name servers in the
+            // fallback name server provider.
+            nsCache.cache("nettyfoo.com.", null, dnsServer2.localAddress().getAddress(), 10000, group.next());
+            resolver = new DnsNameResolver(
+                    group.next(), new ReflectiveChannelFactory<DatagramChannel>(NioDatagramChannel.class),
+                    NoopDnsCache.INSTANCE, nsCache, NoopDnsQueryLifecycleObserverFactory.INSTANCE, 3000,
+                    ipv4Preferred ? ResolvedAddressTypes.IPV4_ONLY : ResolvedAddressTypes.IPV6_ONLY, true,
+                    10, true, 4096, false, HostsFileEntriesResolver.DEFAULT,
+                    new SequentialDnsServerAddressStreamProvider(dnsServer2.localAddress(), dnsServer3.localAddress()),
+                    DnsNameResolver.DEFAULT_SEARCH_DOMAINS, 0, true) {
+                @Override
+                int dnsRedirectPort(InetAddress server) {
+                    return hitServer2.get() ? dnsServer3.localAddress().getPort() : dnsServer2.localAddress().getPort();
+                }
+            };
+            InetAddress resolvedAddress = resolver.resolve(firstName).syncUninterruptibly().getNow();
+            if (ipv4Preferred) {
+                assertEquals(ipv4Addr, resolvedAddress.getHostAddress());
+            } else {
+                assertEquals(ipv6Addr, NetUtil.toAddressString(resolvedAddress));
+            }
+            assertEquals(firstName, resolvedAddress.getHostName());
+        } finally {
+            dnsServer2.stop();
+            dnsServer3.stop();
             if (resolver != null) {
                 resolver.close();
             }

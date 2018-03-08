@@ -163,7 +163,6 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
     }
 
     private HandshakeState handshakeState = HandshakeState.NOT_STARTED;
-    private boolean renegotiationPending;
     private boolean receivedShutdown;
     private volatile int destroyed;
     private volatile String applicationProtocol;
@@ -213,7 +212,6 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
     private final ByteBufAllocator alloc;
     private final OpenSslEngineMap engineMap;
     private final OpenSslApplicationProtocolNegotiator apn;
-    private final boolean rejectRemoteInitiatedRenegotiation;
     private final OpenSslSession session;
     private final Certificate[] localCerts;
     private final ByteBuffer[] singleSrcBuffer = new ByteBuffer[1];
@@ -248,7 +246,6 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
         session = new OpenSslSession(context.sessionContext());
         clientMode = context.isClient();
         engineMap = context.engineMap;
-        rejectRemoteInitiatedRenegotiation = context.getRejectRemoteInitiatedRenegotiation();
         localCerts = context.keyCertChain;
         keyMaterialManager = context.keyMaterialManager();
         enableOcsp = context.enableOcsp;
@@ -427,7 +424,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
         final int sslWrote;
 
         if (src.isDirect()) {
-            sslWrote = SSL.writeToSSL(ssl, Buffer.address(src) + pos, len);
+            sslWrote = SSL.writeToSSL(ssl, bufferAddress(src) + pos, len);
             if (sslWrote > 0) {
                 src.position(pos + sslWrote);
             }
@@ -458,7 +455,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
     private ByteBuf writeEncryptedData(final ByteBuffer src, int len) {
         final int pos = src.position();
         if (src.isDirect()) {
-            SSL.bioSetByteBuffer(networkBIO, Buffer.address(src) + pos, len, false);
+            SSL.bioSetByteBuffer(networkBIO, bufferAddress(src) + pos, len, false);
         } else {
             final ByteBuf buf = alloc.directBuffer(len);
             try {
@@ -486,7 +483,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
         final int sslRead;
         final int pos = dst.position();
         if (dst.isDirect()) {
-            sslRead = SSL.readFromSSL(ssl, Buffer.address(dst) + pos, dst.limit() - pos);
+            sslRead = SSL.readFromSSL(ssl, bufferAddress(dst) + pos, dst.limit() - pos);
             if (sslRead > 0) {
                 dst.position(pos + sslRead);
             }
@@ -600,7 +597,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             try {
                 // Setup the BIO buffer so that we directly write the encryption results into dst.
                 if (dst.isDirect()) {
-                    SSL.bioSetByteBuffer(networkBIO, Buffer.address(dst) + dst.position(), dst.remaining(),
+                    SSL.bioSetByteBuffer(networkBIO, bufferAddress(dst) + dst.position(), dst.remaining(),
                             true);
                 } else {
                     bioReadCopyBuf = alloc.directBuffer(dst.remaining());
@@ -653,17 +650,6 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
                     }
 
                     status = handshake();
-
-                    if (renegotiationPending && status == FINISHED) {
-                        // If renegotiationPending is true that means when we attempted to start renegotiation
-                        // the BIO buffer didn't have enough space to hold the HelloRequest which prompts the
-                        // client to initiate a renegotiation. At this point the HelloRequest has been written
-                        // so we can actually start the handshake process.
-                        renegotiationPending = false;
-                        SSL.setState(ssl, SSL.SSL_ST_ACCEPT);
-                        handshakeState = HandshakeState.STARTED_EXPLICITLY;
-                        status = handshake();
-                    }
 
                     // Handshake may have generated more data, for example if the internal SSL buffer is small
                     // we may have freed up space by flushing above.
@@ -1134,7 +1120,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
         // As rejectRemoteInitiatedRenegotiation() is called in a finally block we also need to check if we shutdown
         // the engine before as otherwise SSL.getHandshakeCount(ssl) will throw an NPE if the passed in ssl is 0.
         // See https://github.com/netty/netty/issues/7353
-        if (rejectRemoteInitiatedRenegotiation && !isDestroyed() && SSL.getHandshakeCount(ssl) > 1) {
+        if (!isDestroyed() && SSL.getHandshakeCount(ssl) > 1) {
             // TODO: In future versions me may also want to send a fatal_alert to the client and so notify it
             // that the renegotiation failed.
             shutdown();
@@ -1510,43 +1496,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
                 // Nothing to do as the handshake is not done yet.
                 break;
             case FINISHED:
-                if (clientMode) {
-                    // Only supported for server mode at the moment.
-                    throw RENEGOTIATION_UNSUPPORTED;
-                }
-                // For renegotiate on the server side we need to issue the following command sequence with openssl:
-                //
-                // SSL_renegotiate(ssl)
-                // SSL_do_handshake(ssl)
-                // ssl->state = SSL_ST_ACCEPT
-                // SSL_do_handshake(ssl)
-                //
-                // Because of this we fall-through to call handshake() after setting the state, as this will also take
-                // care of updating the internal OpenSslSession object.
-                //
-                // See also:
-                // https://github.com/apache/httpd/blob/2.4.16/modules/ssl/ssl_engine_kernel.c#L812
-                // http://h71000.www7.hp.com/doc/83final/ba554_90007/ch04s03.html
-                int status;
-                if ((status = SSL.renegotiate(ssl)) != 1 || (status = SSL.doHandshake(ssl)) != 1) {
-                    int err = SSL.getError(ssl, status);
-                    if (err == SSL.SSL_ERROR_WANT_READ || err == SSL.SSL_ERROR_WANT_WRITE) {
-                        // If the internal SSL buffer is small it is possible that doHandshake may "fail" because
-                        // there is not enough room to write, so we should wait until the renegotiation has been.
-                        renegotiationPending = true;
-                        handshakeState = HandshakeState.STARTED_EXPLICITLY;
-                        lastAccessed = System.currentTimeMillis();
-                        return;
-                    } else {
-                        throw shutdownWithError("renegotiation failed");
-                    }
-                }
-
-                SSL.setState(ssl, SSL.SSL_ST_ACCEPT);
-
-                lastAccessed = System.currentTimeMillis();
-
-                // fall-through
+                throw RENEGOTIATION_UNSUPPORTED;
             case NOT_STARTED:
                 handshakeState = HandshakeState.STARTED_EXPLICITLY;
                 handshake();
@@ -1850,6 +1800,14 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
     @Override
     public String getNegotiatedApplicationProtocol() {
         return applicationProtocol;
+    }
+
+    private static long bufferAddress(ByteBuffer b) {
+        assert b.isDirect();
+        if (PlatformDependent.hasUnsafe()) {
+            return PlatformDependent.directBufferAddress(b);
+        }
+        return Buffer.address(b);
     }
 
     private final class OpenSslSession implements SSLSession {
