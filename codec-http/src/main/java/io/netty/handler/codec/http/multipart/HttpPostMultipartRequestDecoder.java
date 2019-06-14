@@ -764,8 +764,6 @@ public class HttpPostMultipartRequestDecoder implements InterfaceHttpPostRequest
                         }
                     }
                 }
-            } else {
-                throw new ErrorDataDecoderException("Unknown Params: " + newline);
             }
         }
         // Is it a FileUpload
@@ -1515,6 +1513,6 @@ public class HttpPostMultipartRequestDecoder implements InterfaceHttpPostRequest
             }
         }
         values.add(svalue.substring(start));
-        return values.toArray(new String[values.size()]);
+        return values.toArray(new String[0]);
     }
 }
